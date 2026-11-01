@@ -301,7 +301,7 @@ const store = {
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ---------- Daten ---------- */
-const MAP = 2048, STEP = 6, AD_LAT = 25, AD_H = 11, AD_CURV = .0022, AD_PAD = 26, AD_REACH = 640, AD_GAP = 70;
+const MAP = 2048, STEP = 6, AD_LAT = 25, AD_H = 11, AD_CURV = .0022, AD_PAD = 26, AD_REACH = 640, AD_GAP = 70, PIT_WALL = 72, PIT_WALL_W = 3, PIT_WALL_H = 14;
 const TOP = 265, ACC = 165;
 const FUEL_LAP = .18;              // Spritverbrauch pro Runde bei voller Fahrt
 const WEAR = 6.2e-5;                // Reifenverschleiss je Einheit Kurvenlast
@@ -327,13 +327,13 @@ const THEMES = {
 };
 /* Jede Strecke bringt ihre Boxengasse mit: from/to in Stuetzpunkten relativ zur Ziellinie, side +1 = rechts. */
 const TRACKS = [
-  { id: 'waldring', name: 'Waldring', theme: 'wald', width: 112, grip: 1, lapT: 25.5, wear: 1,
+  { id: 'waldring', name: 'Waldring', theme: 'wald', width: 112, grip: 1, lapT: 25.5, wear: 1, curb: .0028,
     pit: { from: -92, rampIn: 30, rampOut: 30, to: 98, off: 96, boxes: [-54, -33, -12, 9, 30, 51] },
     pts: [[1100,1790],[700,1790],[400,1760],[250,1560],[300,1250],[560,1120],[620,880],[320,720],[260,400],[560,240],[900,330],[1040,600],[1320,640],[1460,340],[1760,260],[1840,600],[1640,860],[1320,900],[1180,1140],[1420,1320],[1780,1300],[1860,1560],[1720,1770],[1500,1790]] },
-  { id: 'kuestenring', name: 'Küstenring', theme: 'kueste', width: 104, grip: .97, lapT: 25.5, wear: 1,
+  { id: 'kuestenring', name: 'Küstenring', theme: 'kueste', width: 104, grip: .97, lapT: 25.5, wear: 1, curb: .0028,
     pit: { from: -92, rampIn: 30, rampOut: 30, to: 98, off: 96, boxes: [-54, -33, -12, 9, 30, 51] },
     pts: [[1000,250],[1300,250],[1620,255],[1800,340],[1840,540],[1720,700],[1480,740],[1270,890],[1400,1060],[1640,1110],[1810,1280],[1790,1540],[1620,1730],[1320,1770],[1050,1660],[900,1440],[700,1380],[550,1480],[430,1680],[260,1760],[130,1580],[170,1280],[340,1110],[560,1010],[640,830],[470,690],[260,640],[170,450],[290,270],[640,250]] },
-  { id: 'sandoval', name: 'Sandoval', theme: 'wueste', width: 124, grip: 1.02, lapT: 20, wear: 1.6,
+  { id: 'sandoval', name: 'Sandoval', theme: 'wueste', width: 124, grip: 1.02, lapT: 20, wear: 1.6, curb: .0019,
     pit: { from: -92, rampIn: 30, rampOut: 30, to: 98, off: 96, boxes: [-54, -33, -12, 9, 30, 51] },
     pts: [[1024,420],[1256,420],[1488,420],[1668,456],[1820,558],[1922,710],[1958,890],[1958,1150],[1922,1330],[1820,1482],[1668,1584],[1488,1620],[1256,1620],[1024,1620],[792,1620],[560,1620],[380,1584],[228,1482],[126,1330],[90,1150],[90,890],[126,710],[228,558],[380,456],[560,420],[792,420]] },
 ];
@@ -433,6 +433,8 @@ function adRuns(tr) {
   runs.push({ side: 1, a: A, b: pit.boxes[0] - 10, lat: s => fence(s, A) }, { side: 1, a: pit.boxes[pit.boxes.length - 1] + 10, b: B, lat: s => fence(s, B) });
   return runs;
 }
+/* Boxenmauer zwischen Fahrbahn und Boxengasse, Enden in Stuetzpunkten ab Ziellinie */
+const pitWallEnds = tr => ({ a: tr.pit.from + tr.pit.rampIn + 4, b: tr.pit.to - tr.pit.rampOut });
 /* Startaufstellung: versetzt, s in Stuetzpunkten relativ zur Ziellinie */
 const gridSlot = i => ({ s: -8 - i * 4, lat: (i & 1 ? 1 : -1) * 22 });
 /* Boxengasse: seitlicher Versatz zur Ideallinie je Position s (Stuetzpunkte relativ zur Ziellinie) */
@@ -479,7 +481,7 @@ function bakeMap(tr) {
   g.strokeStyle = th.edge; g.lineWidth = w + 8; g.stroke(path);
   g.lineCap = 'butt';
   for (let i = 0; i < N; i++) {
-    if (tr.curv[i] < .0028) continue;
+    if (tr.curv[i] < tr.def.curb) continue;
     const a = (i + 1) % N, red = (i >> 2) & 1;
     g.strokeStyle = red ? '#e8352e' : '#eef1ee'; g.lineWidth = w + 22;
     g.beginPath(); g.moveTo(tr.px[i], tr.py[i]); g.lineTo(tr.px[a], tr.py[a]); g.stroke();
@@ -523,6 +525,10 @@ function bakeMap(tr) {
     for (let s = r.a; s <= r.b; s += 2) { const p = trackPoint(tr, s, r.side * (r.lat(s) - 2)); s === r.a ? g.moveTo(p.x, p.y) : g.lineTo(p.x, p.y); }
     g.stroke();
   }
+  const wall = pitWallEnds(tr);
+  g.beginPath();
+  for (let s = wall.a; s <= wall.b; s += 2) { const p = trackPoint(tr, s, PIT_WALL - 2); s === wall.a ? g.moveTo(p.x, p.y) : g.lineTo(p.x, p.y); }
+  g.stroke();
 
   // Boxen-Einfahrt: gelbe Pfeile auf der Strasse, Aufstellfelder der Teams
   for (const s of [pit.from - 44, pit.from - 28, pit.from - 12]) paint(s, tr.half * .55, () => {
@@ -616,6 +622,15 @@ function buildStructures(tr) {
     for (const s of [r.a, r.b]) add([P(s, L(s), AD_H), P(s, L(s) + r.side * 2, AD_H), P(s, L(s) + r.side * 2, 0), P(s, L(s), 0)], { fill: '#2b3038' });
     for (let s = r.a; s <= r.b; s++) { const p = trackPoint(tr, s, L(s) + r.side * 2); tr.scenery.push({ x: p.x, y: p.y, kind: '', r: 7, wall: Math.atan2(tr.ty[(s + tr.N) % tr.N], tr.tx[(s + tr.N) % tr.N]) }); }
   }
+  const wall = pitWallEnds(tr), W0 = PIT_WALL, W1 = W0 + PIT_WALL_W, wh = PIT_WALL_H;
+  for (let s = wall.a, n = 0; s < wall.b; s += 3, n++) {
+    const e = Math.min(s + 3, wall.b);
+    add([P(s, W0, wh), P(e, W0, wh), P(e, W0, 0), P(s, W0, 0)], { fill: '#d5d9df' });
+    add([P(e, W1, wh), P(s, W1, wh), P(s, W1, 0), P(e, W1, 0)], { fill: '#a4abb5' });
+    add([P(s, W0, wh), P(e, W0, wh), P(e, W1, wh), P(s, W1, wh)], { fill: n & 1 ? '#eef1ee' : '#e8352e' });
+  }
+  for (const s of [wall.a, wall.b]) add([P(s, W0, wh), P(s, W1, wh), P(s, W1, 0), P(s, W0, 0)], { fill: '#ffd21f' });
+  for (let s = wall.a; s <= wall.b; s++) { const p = trackPoint(tr, s, W0 + 1.5); tr.scenery.push({ x: p.x, y: p.y, kind: '', r: 7, wall: Math.atan2(tr.ty[(s + tr.N) % tr.N], tr.tx[(s + tr.N) % tr.N]) }); }
   const G0 = pit.off + 50, gh = 34;
   pit.boxes.forEach((b, i) => {
     const tex = TEAMS[i].garage;
@@ -1227,10 +1242,12 @@ const TURBO_TIME = 2.5, TURBO_REFILL = 20;   // Sekunden Reserve, Sekunden bis w
 const PIT_SPEED = 21;              // Stuetzpunkte pro Sekunde, Tempolimit
 function tryEnterPit(k) {
   const tr = G.tr, N = tr.N, pit = tr.pit, s = k.idx > N / 2 ? k.idx - N : k.idx;
-  if (s < pit.from + 2 || s > pit.from + pit.rampIn || k.finished) return;
+  const last = pitWallEnds(tr).a;
+  if (s < pit.from + 2 || s > last || k.finished) return;
   const dx = k.x - tr.px[k.idx], dy = k.y - tr.py[k.idx], lat = -dx * tr.ty[k.idx] + dy * tr.tx[k.idx];
   const forward = Math.cos(k.a) * tr.tx[k.idx] + Math.sin(k.a) * tr.ty[k.idx] > .4;
-  if (forward && (k.ai ? k.wantPit : lat > tr.half * 1.02)) {
+  // kurz vor der Mauer zaehlt nur noch, wer schon dahinter ist, sonst fuehrte die Einfahrt mitten durch sie hindurch
+  if (forward && (k.ai ? k.wantPit : lat > (s > last - 16 ? PIT_WALL : tr.half * 1.02))) {
     k.pit = { s, s0: s, lat0: lat, phase: 'in', box: pit.boxes[k.box], t: 0, wait: 0 };
     k.drift = 0; k.charge = 0; k.boost = 0; k.spin = 0; k.spinA = 0; k.wantPit = false;
     if (k === G.me && !k.ai) { radio('Tempolimit aktiv, Box ' + (k.box + 1)); Snd.tone(700, .1, 'square', .06); openPit(k); }
