@@ -152,13 +152,20 @@ input[type=range] { width: 100%; margin: 0; accent-color: var(--pit); touch-acti
 /* Touch */
 #touch { position: absolute; inset: 0; pointer-events: none; }
 #touch button { position: absolute; pointer-events: auto; touch-action: none; width: 72px; height: 72px; border-radius: 50%; background: #0006; border: 3px solid #fff9; font-weight: 700; font-size: 20px; color: #fff; }
-#tLeft { left: var(--gutter-l); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
-#tRight { left: calc(var(--gutter-l) + 82px); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
-#tDrift { right: var(--gutter-r); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
-#tPause { right: calc(var(--gutter-r) + 82px); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: 52px !important; height: 52px !important; }
-body.touch #map { bottom: 106px; }
+#touch #tLeft, #touch #tRight { width: 112px; height: 112px; border-radius: 26px; font-size: 30px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+#tLeft { left: var(--gutter-l); }
+#tRight { left: calc(var(--gutter-l) + 118px); }
+#touch #tBrake { width: 96px; height: 96px; font-size: 17px; right: var(--gutter-r); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+#tDrift { right: var(--gutter-r); bottom: calc(120px + env(safe-area-inset-bottom, 0px)); }
+#tPause { right: calc(var(--gutter-r) + 84px); bottom: calc(130px + env(safe-area-inset-bottom, 0px)); width: 52px !important; height: 52px !important; }
+body.touch #map { bottom: 138px; }
 body.touch #speed { display: none; }
-body.touch #tires { bottom: 106px; transform: scale(.8); transform-origin: right bottom; }
+body.touch #tires { bottom: 202px; transform: scale(.8); transform-origin: right bottom; }
+@media (orientation: landscape) {
+  #tDrift { right: calc(var(--gutter-r) + 106px); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+  #tPause { right: calc(var(--gutter-r) + 188px); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+  body.touch #tires { bottom: 118px; }
+}
 @media (max-width: 560px) {
   #menu { width: 100%; box-shadow: none; }
   #radio { top: 118px; max-width: calc(100% - 32px); width: max-content; font-size: 17px; }
@@ -189,6 +196,7 @@ body.touch #tires { bottom: 106px; transform: scale(.8); transform-origin: right
   <div id="touch" hidden>
     <button id="tLeft" aria-label="Links lenken">◀</button>
     <button id="tRight" aria-label="Rechts lenken">▶</button>
+    <button id="tBrake" aria-label="Bremsen und rückwärts">Bremse</button>
     <button id="tDrift">Turbo</button>
     <button id="tPause" aria-label="Pause">II</button>
   </div>
@@ -301,7 +309,7 @@ const store = {
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ---------- Daten ---------- */
-const MAP = 2048, STEP = 6, AD_LAT = 25, AD_H = 11, AD_CURV = .0022, AD_PAD = 26, AD_REACH = 640, AD_GAP = 70, PIT_WALL = 72, PIT_WALL_W = 3, PIT_WALL_H = 14;
+const MAP = 2048, STEP = 6, AD_LAT = 25, AD_H = 11, AD_CURV = .0022, AD_PAD = 26, AD_REACH = 640, AD_GAP = 70, PIT_WALL_W = 3, PIT_WALL_H = 14, STREET_LAT = 14, FENCE_H = 22;
 const TOP = 265, ACC = 165;
 const FUEL_LAP = .18;              // Spritverbrauch pro Runde bei voller Fahrt
 const WEAR = 6.2e-5;                // Reifenverschleiss je Einheit Kurvenlast
@@ -324,7 +332,32 @@ const THEMES = {
     a: '#cf9a62', b: '#c6905a', road: '#54504e', road2: '#5e5a58', edge: '#eef1ee', shoulder: '#e4c493',
     skyT: '#3f8ed0', skyB: '#f3dfc0', hill: ['#cf9272', '#a9674c'], fog: '243,226,200', scenery: ['cactus', 'cactus', 'rock', 'bush'],
   },
+  stadt: {
+    a: '#8b8e92', b: '#85888c', road: '#46484e', road2: '#505258', edge: '#eef1ee', shoulder: '#b7b9bb',
+    skyT: '#4a8fd0', skyB: '#dbe8ee', hill: ['#a9b6c4', '#7f8e9f'], fog: '220,230,236', scenery: ['tree', 'bush', 'bush'], skyline: true,
+  },
 };
+/* Stadtkurs: Eckpunkte [x, y, Radius] werden zu Geraden und echten Boegen, start legt die Ziellinie fest */
+function streetPts(C, start) {
+  const n = C.length, arcs = C.map(([x, y, r], i) => {
+    const p = C[(i + n - 1) % n], q = C[(i + 1) % n], a = Math.atan2(p[1] - y, p[0] - x), b = Math.atan2(q[1] - y, q[0] - x);
+    const h = angDiff(b, a), half = Math.abs(h) / 2, d = r / Math.tan(half), m = a + h / 2;
+    const cx = x + Math.cos(m) * r / Math.sin(half), cy = y + Math.sin(m) * r / Math.sin(half);
+    const a0 = Math.atan2(y + Math.sin(a) * d - cy, x + Math.cos(a) * d - cx), da = angDiff(Math.atan2(y + Math.sin(b) * d - cy, x + Math.cos(b) * d - cx), a0);
+    const k = Math.ceil(Math.abs(da) * r / 30), arc = [];
+    for (let j = 0; j <= k; j++) arc.push([cx + r * Math.cos(a0 + da * j / k), cy + r * Math.sin(a0 + da * j / k)]);
+    return arc;
+  });
+  const P = [];
+  arcs.forEach((arc, i) => {
+    P.push(...arc);
+    const s = arc[arc.length - 1], e = arcs[(i + 1) % n][0], g = Math.max(1, Math.round(Math.hypot(e[0] - s[0], e[1] - s[1]) / 120));
+    for (let j = 1; j < g; j++) P.push([lerp(s[0], e[0], j / g), lerp(s[1], e[1], j / g)]);
+  });
+  let first = 0, best = 1e12;
+  P.forEach((q, i) => { const d = Math.hypot(q[0] - start[0], q[1] - start[1]); if (d < best) { best = d; first = i; } });
+  return [...P.slice(first), ...P.slice(0, first)].map(q => q.map(Math.round));
+}
 /* Jede Strecke bringt ihre Boxengasse mit: from/to in Stuetzpunkten relativ zur Ziellinie, side +1 = rechts. */
 const TRACKS = [
   { id: 'waldring', name: 'Waldring', theme: 'wald', width: 112, grip: 1, lapT: 25.5, wear: 1, curb: .0028,
@@ -336,6 +369,9 @@ const TRACKS = [
   { id: 'sandoval', name: 'Sandoval', theme: 'wueste', width: 124, grip: 1.02, lapT: 20, wear: 1.6, curb: .0019,
     pit: { from: -92, rampIn: 30, rampOut: 30, to: 98, off: 96, boxes: [-54, -33, -12, 9, 30, 51] },
     pts: [[1024,420],[1256,420],[1488,420],[1668,456],[1820,558],[1922,710],[1958,890],[1958,1150],[1922,1330],[1820,1482],[1668,1584],[1488,1620],[1256,1620],[1024,1620],[792,1620],[560,1620],[380,1584],[228,1482],[126,1330],[90,1150],[90,890],[126,710],[228,558],[380,456],[560,420],[792,420]] },
+  { id: 'hafenstadt', name: 'Hafenstadt', theme: 'stadt', width: 88, grip: .98, lapT: 22, wear: .85, curb: .0028, street: true,
+    pit: { from: -92, rampIn: 30, rampOut: 30, to: 98, off: 80, boxes: [-54, -33, -12, 9, 30, 51] },
+    pts: streetPts([[1860,200,130],[1860,540,90],[1560,540,90],[1560,800,90],[1860,800,90],[1860,1010,80],[1775,1095,80],[1775,1205,80],[1860,1290,80],[1860,1500,110],[1180,1500,100],[1180,1300,100],[1500,1300,100],[1500,1050,100],[760,1050,100],[760,1500,100],[190,1500,130],[190,200,130]], [1024, 200]) },
 ];
 const CLASSES = [
   { name: 'Rookie', hint: 'gemütlich', ai: .94, rival: 1.01 },
@@ -391,14 +427,14 @@ function nearestIdx(tr, x, y) {
 /* Werbebanden: Kurveninnenseiten und alles, was einem anderen Streckenteil gegenueberliegt.
    Lauf = { side, a, b, lat(s) }, s in Stuetzpunkten ab Ziellinie */
 function adRuns(tr) {
-  const { N, tx, ty, pit } = tr, lat = tr.half + AD_LAT, flat = () => lat, runs = [];
+  const { N, tx, ty, pit } = tr, street = tr.def.street, lat = tr.half + (street ? STREET_LAT : AD_LAT), flat = () => lat, runs = [];
   const lane = [];
   for (let s = pit.from; s <= pit.to; s += 6) lane.push(trackPoint(tr, s, pitLat(tr, s)));
   const free = (i, side) => {
     const q = i > N / 2 ? i - N : i;
     if (side > 0 ? q > pit.from - 14 && q < pit.to + 14 : q > -96 && q < 98) return false;   // Boxengasse, Tribuenen
     const p = trackPoint(tr, i, side * lat), n = nearestIdx(tr, p.x, p.y);
-    return Math.hypot(tr.px[n] - p.x, tr.py[n] - p.y) > tr.half + 18 && lane.every(l => Math.hypot(l.x - p.x, l.y - p.y) > 90);
+    return Math.hypot(tr.px[n] - p.x, tr.py[n] - p.y) > lat - (street ? 6 : AD_LAT - 18) && lane.every(l => Math.hypot(l.x - p.x, l.y - p.y) > 90);
   };
   const facing = (i, side) => {
     for (let d = tr.half + 60; d < AD_REACH; d += 24) {
@@ -408,7 +444,7 @@ function adRuns(tr) {
     return false;
   };
   for (const side of [-1, 1]) {
-    const on = new Uint8Array(N);
+    const on = new Uint8Array(N).fill(street ? 1 : 0);
     for (let i = 0; i < N; i += 4) if (facing(i, side)) for (let j = -AD_PAD; j <= AD_PAD; j++) on[(i + j + N) % N] = 1;
     for (let i = 0; i < N; i++) {
       const a = (i + 4) % N, b = (i + N - 4) % N;
@@ -434,7 +470,7 @@ function adRuns(tr) {
   return runs;
 }
 /* Boxenmauer zwischen Fahrbahn und Boxengasse, Enden in Stuetzpunkten ab Ziellinie */
-const pitWallEnds = tr => ({ a: tr.pit.from + tr.pit.rampIn + 4, b: tr.pit.to - tr.pit.rampOut });
+const pitWallEnds = tr => ({ a: tr.pit.from + tr.pit.rampIn + 4, b: tr.pit.to - tr.pit.rampOut, lat: tr.pit.off - 24 });
 /* Startaufstellung: versetzt, s in Stuetzpunkten relativ zur Ziellinie */
 const gridSlot = i => ({ s: -8 - i * 4, lat: (i & 1 ? 1 : -1) * 22 });
 /* Boxengasse: seitlicher Versatz zur Ideallinie je Position s (Stuetzpunkte relativ zur Ziellinie) */
@@ -527,7 +563,7 @@ function bakeMap(tr) {
   }
   const wall = pitWallEnds(tr);
   g.beginPath();
-  for (let s = wall.a; s <= wall.b; s += 2) { const p = trackPoint(tr, s, PIT_WALL - 2); s === wall.a ? g.moveTo(p.x, p.y) : g.lineTo(p.x, p.y); }
+  for (let s = wall.a; s <= wall.b; s += 2) { const p = trackPoint(tr, s, wall.lat - 2); s === wall.a ? g.moveTo(p.x, p.y) : g.lineTo(p.x, p.y); }
   g.stroke();
 
   // Boxen-Einfahrt: gelbe Pfeile auf der Strasse, Aufstellfelder der Teams
@@ -584,7 +620,7 @@ function bakeMap(tr) {
   for (let t = 0, planted = 0; t < 3000 && planted < 210; t++) {
     const x = 40 + r2() * (MAP - 80), y = 40 + r2() * (MAP - 80);
     const i = nearestIdx(tr, x, y), d = Math.hypot(tr.px[i] - x, tr.py[i] - y);
-    if (d < tr.half + 56 || d > tr.half + 300 || nearPit(x, y)) continue;
+    if (d < tr.half + 56 || d > tr.half + 300 || nearPit(x, y) || tr.blocks?.some(b => Math.hypot(b.x - x, b.y - y) < b.r)) continue;
     if (tr.scenery.some(s => Math.hypot(s.x - x, s.y - y) < 42)) continue;
     tr.scenery.push({ x, y, kind: th.scenery[r2() * th.scenery.length | 0], r: 13 }); planted++;
   }
@@ -619,10 +655,15 @@ function buildStructures(tr) {
       const e = Math.min(s + 4, r.b), x = r.side > 0 ? e : s, y = r.side > 0 ? s : e;     // von der Strecke aus gelesen links nach rechts
       add([P(x, L(x), AD_H), P(y, L(y), AD_H), P(y, L(y), 0), P(x, L(x), 0)], { im: ADS, u: (((r.side > 0 ? -n - 1 : n) * 102.4) % ADS.width + ADS.width) % ADS.width, v: 0, du: 102.4, dv: 48, back: '#2b3038' });
     }
+    if (tr.def.street) for (let s = r.a; s < r.b; s += 4) {
+      const e = Math.min(s + 4, r.b);
+      add([P(s, L(s), AD_H + FENCE_H), P(e, L(e), AD_H + FENCE_H), P(e, L(e), AD_H), P(s, L(s), AD_H)], { fill: '#d7e0e640' });
+      add([P(s, L(s), AD_H + FENCE_H + 1), P(e, L(e), AD_H + FENCE_H + 1), P(e, L(e), AD_H + FENCE_H), P(s, L(s), AD_H + FENCE_H)], { fill: '#59616b' });
+    }
     for (const s of [r.a, r.b]) add([P(s, L(s), AD_H), P(s, L(s) + r.side * 2, AD_H), P(s, L(s) + r.side * 2, 0), P(s, L(s), 0)], { fill: '#2b3038' });
     for (let s = r.a; s <= r.b; s++) { const p = trackPoint(tr, s, L(s) + r.side * 2); tr.scenery.push({ x: p.x, y: p.y, kind: '', r: 7, wall: Math.atan2(tr.ty[(s + tr.N) % tr.N], tr.tx[(s + tr.N) % tr.N]) }); }
   }
-  const wall = pitWallEnds(tr), W0 = PIT_WALL, W1 = W0 + PIT_WALL_W, wh = PIT_WALL_H;
+  const wall = pitWallEnds(tr), W0 = wall.lat, W1 = W0 + PIT_WALL_W, wh = PIT_WALL_H;
   for (let s = wall.a, n = 0; s < wall.b; s += 3, n++) {
     const e = Math.min(s + 3, wall.b);
     add([P(s, W0, wh), P(e, W0, wh), P(e, W0, 0), P(s, W0, 0)], { fill: '#d5d9df' });
@@ -631,6 +672,7 @@ function buildStructures(tr) {
   }
   for (const s of [wall.a, wall.b]) add([P(s, W0, wh), P(s, W1, wh), P(s, W1, 0), P(s, W0, 0)], { fill: '#ffd21f' });
   for (let s = wall.a; s <= wall.b; s++) { const p = trackPoint(tr, s, W0 + 1.5); tr.scenery.push({ x: p.x, y: p.y, kind: '', r: 7, wall: Math.atan2(tr.ty[(s + tr.N) % tr.N], tr.tx[(s + tr.N) % tr.N]) }); }
+  if (tr.def.street) buildBlocks(tr, P, add);
   const G0 = pit.off + 50, gh = 34;
   pit.boxes.forEach((b, i) => {
     const tex = TEAMS[i].garage;
@@ -645,6 +687,38 @@ function buildStructures(tr) {
   add([P(pit.boxes[0] - 10, G0, gh), P(pit.boxes[0] - 10, G0 + 40, gh), P(pit.boxes[0] - 10, G0 + 40, 0), P(pit.boxes[0] - 10, G0, 0)], { fill: '#aeb4bc' });
   const last = pit.boxes[pit.boxes.length - 1] + 10;
   add([P(last, G0, gh), P(last, G0 + 40, gh), P(last, G0 + 40, 0), P(last, G0, 0)], { fill: '#aeb4bc' });
+}
+/* Stadtkurs: Haeuserzeilen entlang der Strecke. Am Kurveninneren bleiben sie niedrig, damit die Sicht frei ist */
+function buildBlocks(tr, P, add) {
+  const { N, pit } = tr, r = rngOf(N * 3 + 1), blocks = tr.blocks = [], lots = [];
+  const clear = (s, lat, min) => { const q = trackPoint(tr, s, lat), n = nearestIdx(tr, q.x, q.y); return Math.hypot(tr.px[n] - q.x, tr.py[n] - q.y) > min; };
+  for (const side of [-1, 1]) for (let s = 0; s < N;) {
+    const w = 14 + r() * 12 | 0, depth = 60 + r() * 40, e = s + w, q = s > N / 2 ? s - N : s, q2 = e > N / 2 ? e - N : e;
+    const inPit = (q > pit.from - 30 && q < pit.to + 30) || (q2 > pit.from - 30 && q2 < pit.to + 30);
+    if (inPit && side < 0) { s = e + 2; continue; }                // am Hafenbecken stehen die Tribuenen
+    const L0 = inPit ? pit.off + 118 : tr.half + STREET_LAT + 40, L1 = L0 + depth, mid = s + w / 2;
+    const m = trackPoint(tr, mid, side * (L0 + depth / 2)), turn = (tr.tx[s % N] * tr.ty[e % N] - tr.ty[s % N] * tr.tx[e % N]) * side, inner = turn > .08;
+    const free = [[s, L0], [e, L0], [s, L1], [e, L1], [mid, L1]].every(([u, l]) => clear(u, side * l, tr.half + STREET_LAT + 26)) && m.x > 30 && m.x < MAP - 30 && m.y > 30 && m.y < MAP - 30
+      && lots.every(o => Math.hypot(o.x - m.x, o.y - m.y) > 78);
+    if (free) {
+      const h = inner ? 34 + r() * 12 : 54 + r() * 70, tex = FACADES[r() * FACADES.length | 0];
+      lots.push({ x: m.x, y: m.y }); blocks.push({ x: m.x, y: m.y, r: 92 });
+      const a = side * L0, b = side * L1, dv = Math.min(tex.im.height, h * 3), v = tex.im.height - dv;
+      for (let t = s, n = 0; t < e; t += 4, n++) {
+        const f = Math.min(t + 4, e);
+        add([P(t, a, h), P(f, a, h), P(f, a, 0), P(t, a, 0)], { im: tex.im, u: (n % 6) * 48, v, du: 48 * (f - t) / 4, dv });
+        add([P(f, b, h), P(t, b, h), P(t, b, 0), P(f, b, 0)], { fill: tex.side });
+      }
+      for (const t of [s, e]) add([P(t, a, h), P(t, b, h), P(t, b, 0), P(t, a, 0)], { fill: tex.side });
+    }
+    s = e + (free ? 1 : 3);
+  }
+  for (let s = 0; s < N; s += 30) for (const side of [-1, 1]) {
+    const q = s > N / 2 ? s - N : s;
+    if ((q > pit.from - 26 && q < pit.to + 26) || !clear(s, side * (tr.half + STREET_LAT + 16), tr.half + STREET_LAT + 8)) continue;
+    const p = trackPoint(tr, s, side * (tr.half + STREET_LAT + 16));
+    tr.scenery.push({ x: p.x, y: p.y, kind: 'lamp', r: 5 });
+  }
 }
 function drawFace(f) {
   const q = [];
@@ -878,6 +952,11 @@ const SCENERY = {
       for (let t = 0; t < h; t++) v.ball(0, y * 15, z + t, 3.6, '#3f8a55');
     }
   }, 90, 130),
+  lamp: plant(v => {
+    trunk(v, 72, 1, '#4a5058');
+    for (let t = 0; t < 14; t++) v.ball(0, t, 72 + (t >> 2), 1.2, '#4a5058');
+    v.ball(0, 15, 74, 2.6, '#fff3c4');
+  }, 60, 130),
   bush: plant(v => { [[0, -11, 9, 10], [0, 11, 9, 10], [0, 0, 14, 12]].forEach(([x, y, z, r]) => v.ball(x, y, z, r, leaf(r, GREENS))); }, 90, 60),
   pine: plant(v => {
     trunk(v, 22, 3, '#5a3a24');
@@ -904,6 +983,21 @@ const CROWD = sprite(256, 256, g => {
     }
   }
 });
+/* Hausfassaden: Fenster je Stockwerk, unten eine Ladenzeile. Von unten nach oben gelesen, damit jede Hoehe passt */
+const FACADES = [['#c9b79c', '#a8977e'], ['#b5705a', '#95594a'], ['#d8d3c8', '#b6b1a6'], ['#7f93a6', '#67798b'], ['#a58a70', '#87705a']].map(([wall, side], i) => ({ side, im: sprite(288, 480, g => {
+  const r = rngOf(i * 17 + 3);
+  g.fillStyle = wall; g.fillRect(0, 0, 288, 480);
+  for (let y = 0; y < 408; y += 44) {
+    g.fillStyle = '#00000018'; g.fillRect(0, y + 38, 288, 3);
+    for (let x = 0; x < 288; x += 48) {
+      g.fillStyle = r() < .3 ? '#ffe9a8' : '#3c4c5e'; g.fillRect(x + 10, y + 8, 28, 26);
+      g.fillStyle = '#ffffff30'; g.fillRect(x + 10, y + 8, 28, 5);
+    }
+  }
+  g.fillStyle = '#3a3f46'; g.fillRect(0, 420, 288, 60);
+  for (let x = 0; x < 288; x += 48) { g.fillStyle = r() < .5 ? '#9fc4d8' : '#e9d9a0'; g.fillRect(x + 5, 430, 38, 42); }
+  g.fillStyle = ['#c8202c', '#12a59a', '#2360d8'][i % 3]; g.fillRect(0, 412, 288, 10);
+}) }));
 const ADS = sprite(2048, 48, g => {
   [['TURBOBRAUSE', '#e8352e', '#fff'], ['GUMMIWERK', '#15191f', '#ffd21f'], ['BOXENFUNK', '#ffd21f', '#15191f'], ['SCHNELLTANK', '#12a59a', '#fff'],
    ['SPÄTBREMSER', '#eef1ee', '#c8202c'], ['KURVENKÖNIGE', '#2360d8', '#ffd21f'], ['VOLLGAS KAFFEE', '#f07a1a', '#15191f'], ['GRAND PRIX', '#2f8a4e', '#fff']].forEach(([t, bg, fg], i) => {
@@ -992,7 +1086,16 @@ function bakeBackdrop(tr) {
   const th = tr.theme, hz = view.hz, W = 1024, H = Math.max(hz, 40);
   G.sky = sprite(W, H, g => {
     const r = rngOf(tr.N);
-    th.hill.forEach((col, l) => {
+    if (th.skyline) th.hill.forEach((col, l) => {
+      for (let x = -20; x < W;) {
+        const w = 18 + r() * 34, h = H * (l ? .18 + r() * .3 : .34 + r() * .5);
+        g.fillStyle = col; g.fillRect(x, H - h, w, h);
+        g.fillStyle = '#ffffff1f';
+        for (let y = H - h + 3; y < H - 3; y += 6) for (let u = x + 3; u < x + w - 3; u += 5) if (r() < .6) g.fillRect(u, y, 2, 3);
+        x += w + (r() < .25 ? 6 : 0);
+      }
+    });
+    else th.hill.forEach((col, l) => {
       const p = [r() * TAU, r() * TAU, r() * TAU], amp = (l ? .26 : .46) * H, base = H - (l ? .08 : .16) * H;
       g.fillStyle = col; g.beginPath(); g.moveTo(0, H);
       for (let x = 0; x <= W; x += 4) {
@@ -1017,7 +1120,7 @@ function bakeBackdrop(tr) {
 }
 
 /* ---------- Eingabe ---------- */
-const keys = new Set(), touch = { left: false, right: false, drift: false };
+const keys = new Set(), touch = { left: false, right: false, drift: false, brake: false };
 let touchMode = false;
 const GAME_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space', 'Enter'];
 addEventListener('keydown', e => {
@@ -1037,8 +1140,8 @@ function readInput() {
   const left = keys.has('ArrowLeft') || keys.has('KeyA') || touch.left, right = keys.has('ArrowRight') || keys.has('KeyD') || touch.right;
   return {
     steer: (right ? 1 : 0) - (left ? 1 : 0),
-    gas: keys.has('ArrowUp') || keys.has('KeyW') || touchMode,
-    brake: keys.has('ArrowDown') || keys.has('KeyS'),
+    gas: keys.has('ArrowUp') || keys.has('KeyW') || (touchMode && !touch.brake),
+    brake: keys.has('ArrowDown') || keys.has('KeyS') || touch.brake,
     drift: keys.has('Space') || keys.has('ShiftLeft') || touch.drift,
   };
 }
@@ -1050,6 +1153,7 @@ function hold(id, on, off) {
 hold('tLeft', () => { touch.left = true; }, () => { touch.left = false; });
 hold('tRight', () => { touch.right = true; }, () => { touch.right = false; });
 hold('tDrift', () => { touch.drift = true; }, () => { touch.drift = false; });
+hold('tBrake', () => { touch.brake = true; }, () => { touch.brake = false; });
 hold('tPause', () => togglePause());
 addEventListener('touchstart', () => {
   if (touchMode) return;
@@ -1242,12 +1346,12 @@ const TURBO_TIME = 2.5, TURBO_REFILL = 20;   // Sekunden Reserve, Sekunden bis w
 const PIT_SPEED = 21;              // Stuetzpunkte pro Sekunde, Tempolimit
 function tryEnterPit(k) {
   const tr = G.tr, N = tr.N, pit = tr.pit, s = k.idx > N / 2 ? k.idx - N : k.idx;
-  const last = pitWallEnds(tr).a;
+  const wall = pitWallEnds(tr), last = wall.a;
   if (s < pit.from + 2 || s > last || k.finished) return;
   const dx = k.x - tr.px[k.idx], dy = k.y - tr.py[k.idx], lat = -dx * tr.ty[k.idx] + dy * tr.tx[k.idx];
   const forward = Math.cos(k.a) * tr.tx[k.idx] + Math.sin(k.a) * tr.ty[k.idx] > .4;
   // kurz vor der Mauer zaehlt nur noch, wer schon dahinter ist, sonst fuehrte die Einfahrt mitten durch sie hindurch
-  if (forward && (k.ai ? k.wantPit : lat > (s > last - 16 ? PIT_WALL : tr.half * 1.02))) {
+  if (forward && (k.ai ? k.wantPit : lat > (s > last - 16 ? wall.lat : tr.half * 1.02))) {
     k.pit = { s, s0: s, lat0: lat, phase: 'in', box: pit.boxes[k.box], t: 0, wait: 0 };
     k.drift = 0; k.charge = 0; k.boost = 0; k.spin = 0; k.spinA = 0; k.wantPit = false;
     if (k === G.me && !k.ai) { radio('Tempolimit aktiv, Box ' + (k.box + 1)); Snd.tone(700, .1, 'square', .06); openPit(k); }
@@ -1474,7 +1578,7 @@ function aiInput(k, dt) {
   if (k.rival) {
     if (k.off) k.aiCurve = 0;
     else if (cMax > .0045) k.aiCurve += dt;
-    else if (cMax < .003) { if (k.aiCurve > .6) k.boost = Math.max(k.boost, .55); k.aiCurve = 0; }
+    else if (cMax < .003) { if (k.aiCurve > .6) k.boost = Math.max(k.boost, tr.def.street ? .3 : .55); k.aiCurve = 0; }
   }
   return { steer: clamp(d * (k.rival ? 3.6 : 2.8), -1, 1), gas: k.v < limit, brake: k.v > limit + 28, drift: false };
 }
